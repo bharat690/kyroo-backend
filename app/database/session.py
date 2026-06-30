@@ -17,14 +17,4 @@ SessionLocal = sessionmaker(
 )
 
 
-def get_db():
-    """
-    FastAPI dependency.
-    Creates one database session per request.
-    """
-    db = SessionLocal()
 
-    try:
-        yield db
-    finally:
-        db.close()

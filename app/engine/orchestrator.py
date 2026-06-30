@@ -1,13 +1,13 @@
 from sqlalchemy.orm import Session
-from context import EngineContext
-from pipeline import Pipeline
-from message_formatter import MessageFormatter
-from app.models.message import MessageRole
-from app.services.user.service import UserService
+
+from app.brain.prompt_builder import PromptBuilder
+
+from app.services.memory.service import MemoryService
 from app.services.conversation_service import ConversationService
+from app.services.user.service import UserService
+
 from app.llm.factory import LLMFactory
-
-
+from app.models.message import MessageRole
 
 
 class Orchestrator:
@@ -16,6 +16,10 @@ class Orchestrator:
 
         self.user_service = UserService(db)
         self.conversation_service = ConversationService(db)
+
+        self.memory_service = MemoryService(db)
+        self.prompt_builder = PromptBuilder()
+
 
     def process(
         self,
