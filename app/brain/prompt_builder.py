@@ -31,10 +31,29 @@ class PromptBuilder:
 
         state = self.context.build(user_message)
 
-        history_text = "\n".join(
-            f"{m.role.value}: {m.content}"
-            for m in history
+        GREETINGS = {
+            "hi",
+            "hii",
+            "hiii",
+            "hello",
+            "heyy",
+            "hey",
+            "yo",
+            "sup",
+        }
+
+        is_greeting = (
+            user_message.lower().strip() in GREETINGS
         )
+
+        if is_greeting:
+            history_text = ""
+            memory_context = ""
+        else:
+            history_text = "\n".join(
+                f"{m.role.value}: {m.content}"
+                for m in history
+            )
 
         sections = [
             self.load("identity.md"),
@@ -70,6 +89,29 @@ Relationship: {state.relationship}
 Energy: {state.energy}
 """
         )
+
+        sections.append(
+    f"""  
+CURRENT MESSAGE TYPE
+
+Greeting: {is_greeting}
+
+If Greeting is True:
+
+Reply only with a natural greeting.
+
+Never bring up old conversations.
+
+Never ask questions.
+
+Never mention previous topics.
+
+
+
+Priority : Maximum 10 words.
+
+"""
+)
 
         sections.append(
             f"""
