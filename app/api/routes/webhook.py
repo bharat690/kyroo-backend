@@ -8,6 +8,7 @@ from app.api.dependencies.database import get_db
 from app.core.config import settings
 from app.engine.orchestrator import Orchestrator
 from app.infrastructure.whatsapp.client import WhatsAppClient
+from app.brain.response_validator import ResponseValidator
 
 router = APIRouter(tags=["WhatsApp"])
 
@@ -57,9 +58,13 @@ async def webhook(
         text,
     )
 
+    messages = ResponseValidator().validate(
+        reply,
+    )
+
     WhatsAppClient().send(
         phone,
-        reply,
+        messages,
     )
 
     return {"status": "ok"}

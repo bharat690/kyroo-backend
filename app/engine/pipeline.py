@@ -1,7 +1,7 @@
 from app.engine.context import EngineContext
 from app.engine.domain_detector import DomainDetector
 from app.engine.memory_retriever import MemoryRetriever
-from app.engine.prompt_builder import PromptBuilder
+from app.brain.prompt_builder import PromptBuilder
 
 
 class Pipeline:
