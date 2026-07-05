@@ -1,6 +1,7 @@
 from app.brain.detectors.emotion import EmotionDetector
 from app.brain.detectors.language import LanguageDetector
 from app.brain.state import BrainState
+from app.brain.style_learner import StyleLearner
 
 
 class ContextBuilder:
@@ -50,6 +51,7 @@ class ContextBuilder:
     def build(
         self,
         message: str,
+        history=None,
     ) -> BrainState:
 
         msg = message.lower()
@@ -57,6 +59,10 @@ class ContextBuilder:
         language = LanguageDetector.detect(message)
 
         emotion = EmotionDetector.detect(message)
+
+        style_profile = StyleLearner.learn(
+            history or []
+        )
 
         intent = "casual"
 
@@ -168,4 +174,5 @@ class ContextBuilder:
             end_conversation=end_conversation,
             bubble_count=bubble_count,
             needs_web=needs_web,
+            style_profile=style_profile,
         )

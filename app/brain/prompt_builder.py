@@ -24,12 +24,12 @@ class PromptBuilder:
 
     def build(
         self,
-        memory_context: str,
+        state,
+        memory_context,
         history,
-        user_message: str,
-    ) -> Prompt:
+        user_message,
+    ):
 
-        state = self.context.build(user_message)
 
         GREETINGS = {
             "hi",
@@ -104,6 +104,28 @@ class PromptBuilder:
 
         Needs Web Search: {state.needs_web}
         """
+        )
+
+        sections.append(
+            f"""
+            USER STYLE
+
+            Emoji Usage: {state.style_profile['emoji_rate']}
+
+            Reply Length: {state.style_profile['reply_style']}
+
+            Capitalization: {state.style_profile['capitalization']}
+
+            Uses Hinglish: {state.style_profile['hinglish']}
+
+            Uses Gen Z Slang: {state.style_profile['genz']}
+
+            Mirror this naturally.
+
+            Do not exaggerate.
+
+            Never become more expressive than the user.
+            """
         )
 
         sections.append(

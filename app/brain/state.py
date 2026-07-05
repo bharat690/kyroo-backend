@@ -18,6 +18,8 @@ class BrainState:
 
     intent: str
 
+    style_profile: dict
+
     reply_length: str
 
     ask_question: bool

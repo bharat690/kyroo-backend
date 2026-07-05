@@ -41,7 +41,13 @@ class Orchestrator:
             user.id
         )
 
+        state = self.prompt_builder.context.build(
+            message,
+            history,
+        )
+
         prompt = self.prompt_builder.build(
+            state=state,
             memory_context=memory_context,
             history=history,
             user_message=message,
