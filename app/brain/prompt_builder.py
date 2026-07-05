@@ -76,58 +76,74 @@ class PromptBuilder:
 
         sections.append(
             f"""
-CURRENT STATE
+        CURRENT STATE
 
-Language: {state.language}
+        Language: {state.language}
 
-Emotion: {state.emotion}
+        Emotion: {state.emotion}
 
-Topic: {state.topic}
+        Topic: {state.topic}
 
-Relationship: {state.relationship}
+        Relationship: {state.relationship}
 
-Energy: {state.energy}
-"""
+        Energy: {state.energy}
+
+        Intent: {state.intent}
+
+        Reply Length: {state.reply_length}
+
+        Ask Question: {state.ask_question}
+
+        Use Memory: {state.use_memory}
+
+        Tease User: {state.tease}
+
+        End Conversation: {state.end_conversation}
+
+        Bubble Count: {state.bubble_count}
+
+        Needs Web Search: {state.needs_web}
+        """
         )
 
         sections.append(
-    f"""  
-CURRENT MESSAGE TYPE
+            f"""  
+        CURRENT MESSAGE TYPE
 
-Greeting: {is_greeting}
+        Greeting: {is_greeting}
 
-If Greeting is True:
+        If Greeting is True:
 
-Reply only with a natural greeting.
+        Reply only with a natural greeting.
 
-Never bring up old conversations.
+        Never bring up old conversations.
 
-Never ask questions.
+        Never ask questions.
 
-Never mention previous topics.
+        Never mention previous topics.
 
 
 
-Priority : Maximum 10 words.
+        Priority : Maximum 10 words.
 
-"""
-)
+        """
+        )
 
         sections.append(
             f"""
-KNOWN MEMORIES
+            KNOWN MEMORIES
 
-{memory_context}
-"""
-        )
+            {memory_context}
+            """
+                    )
 
         sections.append(
-            f"""
-RECENT CHAT
+                        f"""
+            RECENT CHAT
 
-{history_text}
-"""
-        )
+            {history_text}
+            """
+                    )
 
         return Prompt(
             system_prompt="\n\n".join(sections),
