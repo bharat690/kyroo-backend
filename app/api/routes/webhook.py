@@ -8,7 +8,6 @@ from app.api.dependencies.database import get_db
 from app.core.config import settings
 from app.engine.orchestrator import Orchestrator
 from app.infrastructure.whatsapp.client import WhatsAppClient
-from app.brain.response_validator import ResponseValidator
 
 router = APIRouter(tags=["WhatsApp"])
 
@@ -53,18 +52,16 @@ async def webhook(
 
     text = message["text"]["body"].strip()
 
-    reply = Orchestrator(db).process(
+    # The orchestrator now returns a list of bubbles
+    bubbles = Orchestrator(db).process(
         phone,
         text,
     )
 
-    messages = ResponseValidator().validate(
-        reply,
-    )
-
-    WhatsAppClient().send(
+    # Send each bubble with appropriate delay
+    WhatsAppClient().send_bubbles(
         phone,
-        messages,
+        bubbles,
     )
 
     return {"status": "ok"}
