@@ -1,14 +1,7 @@
 from collections.abc import Generator
-
-from sqlalchemy.orm import Session
-
-from app.database.session import SessionLocal
+from app.database.supabase_client import get_supabase
 
 
-def get_db() -> Generator[Session, None, None]:
-    db = SessionLocal()
-
-    try:
-        yield db
-    finally:
-        db.close()
+def get_db() -> Generator:
+    """Yields Supabase client instead of SQLAlchemy session."""
+    yield get_supabase()

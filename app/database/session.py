@@ -1,20 +1,9 @@
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+# app/database/session.py
+# This file is no longer used - we use Supabase now
+# Kept for backwards compatibility but does nothing
 
-from app.core.config import settings
+from app.database.supabase_client import get_supabase
 
-engine = create_engine(
-    settings.database_url,
-    pool_pre_ping=True,
-    future=True,
-)
-
-SessionLocal = sessionmaker(
-    bind=engine,
-    autoflush=False,
-    autocommit=False,
-    expire_on_commit=False,
-)
-
-
-
+# Alias for any code that might still reference this
+SessionLocal = None
+engine = None

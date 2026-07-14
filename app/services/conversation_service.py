@@ -1,68 +1,83 @@
-# app/services/conversation_service.py
-from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import func
-
-from app.models.conversation import Conversation
-from app.models.message import Message, MessageRole
-from app.models.user import User
-from app.repositories.conversation_repository import ConversationRepository
-from app.repositories.message_repository import MessageRepository
+from app.database.supabase_client import get_supabase
+from app.models.message import MessageRole
 
 
 class ConversationService:
 
-    def __init__(self, db: Session):
-        self.db = db
-        self.conversation_repo = ConversationRepository(db)
-        self.message_repo = MessageRepository(db)
-
-    def get_or_create_conversation(self, user: User) -> Conversation:
-        conversation = (
-            self.conversation_repo.get_latest_by_user(user.id)
-        )
-
-        if conversation:
-            return conversation
-
-        return self.conversation_repo.create(
-            user_id=user.id,
-            title="New Conversation",
-        )
+    def __init__(self, db=None):
+        self.db = db or get_supabase()
 
     def add_message(
         self,
-        user: User,
+        user: dict,
         role: MessageRole,
         content: str,
-    ) -> Conversation:
+        module: str = "general",
+    ) -> dict:
+        """Add a message to chat history."""
+        if role == MessageRole.USER:
+            user_message = content
+            kiro_response = ""
+        else:
+            user_message = ""
+            kiro_response = content
 
-        conversation = self.get_or_create_conversation(user)
+        res = self.db.table("chat_history").insert({
+            "user_id": user["id"],
+            "user_message": user_message,
+            "kiro_response": kiro_response,
+            "module": module,
+        }).execute()
 
-        self.message_repo.create(
-            conversation_id=conversation.id,
-            role=role,
-            content=content,
-        )
-
-        return conversation
+        return {"conversation_id": user["id"]}
 
     def history(
         self,
-        conversation: Conversation,
-        limit: int = 20,
-    ) -> list[Message]:
-
-        return (
-            self.message_repo.get_by_conversation(
-                conversation.id,
-                limit=limit,
+        conversation_id: str,
+        limit: int = 10,
+    ) -> list[dict]:
+        """Get recent chat history as message objects."""
+        try:
+            res = (
+                self.db.table("chat_history")
+                .select("*")
+                .eq("user_id", conversation_id)
+                .order("created_at", desc=True)
+                .limit(limit)
+                .execute()
             )
-        )
 
-    def count_conversations(self, user: User) -> int:
-        return (
-            self.db.query(func.count(Conversation.id))
-            .filter(Conversation.user_id == user.id)
-            .scalar()
-            or 0
-        )
+            messages = []
+            for m in reversed(res.data or []):
+                if m.get("user_message"):
+                    messages.append({
+                        "role": "user",
+                        "content": m["user_message"],
+                    })
+                if m.get("kiro_response"):
+                    messages.append({
+                        "role": "assistant",
+                        "content": m["kiro_response"],
+                    })
+            return messages
+        except Exception:
+            return []
+
+    def get_history_raw(
+        self,
+        user_id: str,
+        limit: int = 10,
+    ) -> list[dict]:
+        """Get raw chat history records."""
+        try:
+            res = (
+                self.db.table("chat_history")
+                .select("*")
+                .eq("user_id", user_id)
+                .order("created_at", desc=True)
+                .limit(limit)
+                .execute()
+            )
+            return res.data or []
+        except Exception:
+            return []
