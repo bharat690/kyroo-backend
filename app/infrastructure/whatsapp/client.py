@@ -1,4 +1,5 @@
 # app/infrastructure/whatsapp/client.py
+import base64
 import random
 import time
 
@@ -12,6 +13,30 @@ class WhatsAppClient:
     BASE_URL = "https://graph.facebook.com/v22.0"
 
     DEFAULT_DELAY_RANGE = (0.8, 2.0)
+
+    def download_media(self, media_id: str) -> tuple[str, str] | None:
+        """Fetches a WhatsApp media file (image, etc.) and returns (base64_data, mime_type), or None on failure."""
+        try:
+            meta_resp = requests.get(
+                f"{self.BASE_URL}/{media_id}",
+                headers={"Authorization": f"Bearer {settings.whatsapp_token}"},
+                timeout=10,
+            )
+            meta = meta_resp.json()
+            media_url = meta.get("url")
+            mime_type = meta.get("mime_type", "image/jpeg")
+            if not media_url:
+                return None
+
+            file_resp = requests.get(
+                media_url,
+                headers={"Authorization": f"Bearer {settings.whatsapp_token}"},
+                timeout=15,
+            )
+            return base64.b64encode(file_resp.content).decode("utf-8"), mime_type
+        except Exception as e:
+            print(f"[whatsapp] media download error: {e}")
+            return None
 
     def send(self, phone: str, messages: list[str]):
         for message in messages:
