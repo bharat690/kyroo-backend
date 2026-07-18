@@ -8,7 +8,7 @@ from app.infrastructure.whatsapp.client import WhatsAppClient
 from app.brain.kyroo_brain import validate_response, kyroo_brain
 from app.brain.debounce import buffer_message
 from app.models.message import MessageRole
-from app.services.user.service import UserService
+from app.services.user_service import UserService
 from app.services.conversation_service import ConversationService
 
 router = APIRouter(tags=["WhatsApp"])

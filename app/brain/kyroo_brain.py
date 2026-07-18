@@ -4,7 +4,7 @@ import anthropic
 
 from app.core.config import settings
 from app.database.supabase_client import get_supabase
-from app.services.memory.service import MemoryService
+from app.services.memory_service import MemoryService
 from app.brain.slang import lookup_slang
 from app.brain.response_validator import validate_response
 
