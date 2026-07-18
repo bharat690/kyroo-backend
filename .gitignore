@@ -1,14 +1,24 @@
 # Virtual Environment
 .venv/
+venv/
 
 # Python
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
+*.egg-info/
 
-# Environment Variables
+# Environment Variables — NEVER COMMIT
 .env
+.env.*
+*.env
+!.env.example
+
+# Node
+node_modules/
+.next/
+.netlify/
 
 # IDE
 .vscode/
@@ -24,8 +34,13 @@ Thumbs.db
 # Testing
 .pytest_cache/
 
-# Alembic cache
-alembic/__pycache__/
-
-# SQLite
+# SQLite / DB
 *.db
+*.sqlite
+
+# Security
+*.pem
+*.key
+*.cert
+secrets/
+credentials/
