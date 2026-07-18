@@ -1,4 +1,4 @@
-from app.services.user.service import UserService
+from app.services.user_service import UserService
 from app.services.conversation_service import ConversationService
 from app.brain.kyroo_brain import kyroo_brain, validate_response
 

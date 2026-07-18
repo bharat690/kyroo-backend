@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends
 from app.api.dependencies.database import get_db
-from app.services.user.service import UserService
+from app.services.user_service import UserService
 
 router = APIRouter(prefix="/users", tags=["Users"])
 
