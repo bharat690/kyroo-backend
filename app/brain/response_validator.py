@@ -27,6 +27,31 @@ def _is_leaked_reasoning(bubble: str) -> bool:
     return any(sig in low for sig in _LEAK_SIGNATURES)
 
 
+_EMOJI_PATTERN = re.compile(
+    "["
+    "\U0001F600-\U0001F64F"
+    "\U0001F300-\U0001F5FF"
+    "\U0001F680-\U0001F9FF"
+    "\U00002702-\U000027B0"
+    "\U0001FA00-\U0001FAFF"
+    "]",
+    flags=re.UNICODE,
+)
+
+MAX_EMOJIS_PER_BUBBLE = 1
+
+
+def _cap_emojis(bubble: str, max_emojis: int = MAX_EMOJIS_PER_BUBBLE) -> str:
+    """Hard backstop for the 'strict max 1 emoji per message' persona rule —
+    the model doesn't always follow it, so enforce it in code too."""
+    matches = list(_EMOJI_PATTERN.finditer(bubble))
+    if len(matches) <= max_emojis:
+        return bubble
+    keep = {m.start() for m in matches[:max_emojis]}
+    chars = [c for i, c in enumerate(bubble) if not (_EMOJI_PATTERN.match(c) and i not in keep)]
+    return re.sub(r' {2,}', ' ', "".join(chars)).strip()
+
+
 def validate_response(text: str) -> list[str]:
     """Validate and split a raw model reply into WhatsApp-ready bubbles."""
     cleaned = text.strip()
@@ -60,6 +85,7 @@ def validate_response(text: str) -> list[str]:
 
     bubbles = [b.strip() for b in cleaned.split("\n\n") if b.strip()]
     bubbles = [b for b in bubbles if not _is_leaked_reasoning(b)]
+    bubbles = [_cap_emojis(b) for b in bubbles]
     if not bubbles:
         bubbles = ["hmm one sec, my brain glitched, say that again?"]
     return bubbles[:4]
