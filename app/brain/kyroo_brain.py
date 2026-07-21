@@ -990,6 +990,93 @@ def generate_morning_nudge(user: dict) -> str:
     return response.content[0].text
 
 
+def _todays_tracking_row(db, user_id: str) -> dict | None:
+    """Today's user_tracking row (IST), if one exists yet."""
+    try:
+        import pytz
+        from datetime import datetime
+        today = datetime.now(pytz.timezone("Asia/Kolkata")).strftime("%Y-%m-%d")
+        res = (
+            db.table("user_tracking")
+            .select("*")
+            .eq("user_id", user_id)
+            .eq("date", today)
+            .limit(1)
+            .execute()
+        )
+        return (res.data or [None])[0]
+    except Exception:
+        return None
+
+
+# ─── AFTERNOON NUDGE (money check-in) ────────────────────────────────────────
+
+def generate_afternoon_nudge(user: dict) -> str:
+    db = get_supabase()
+    user_id = user.get("id", "")
+    name = user.get("name", "yaar") if user else "yaar"
+    money_habit = user.get("money_habit", "")
+    today = _todays_tracking_row(db, user_id)
+
+    context = "No spending logged yet today."
+    if today and today.get("spent_today") is not None:
+        cat = today.get("spent_category", "")
+        context = f"Spent ₹{today['spent_today']} today so far" + (f" on {cat}" if cat else "") + "."
+
+    response = client.messages.create(
+        model=MODEL,
+        max_tokens=110,
+        system=f"You are KYROO, {name}'s AI best friend. Midday WhatsApp check-in about money. Gen Z Hinglish, casual, never preachy or like a budgeting app. Max 3 lines. Money habit: {money_habit}. {context}. If there's nothing specific to react to, just casually ask what they've spent on today, don't lecture. 1 emoji max. No em dashes. No motivation quotes.",
+        messages=[{"role": "user", "content": f"Afternoon money check-in for {name}"}]
+    )
+    return response.content[0].text
+
+
+# ─── EVENING NUDGE (fitness check-in) ────────────────────────────────────────
+
+def generate_evening_nudge(user: dict) -> str:
+    db = get_supabase()
+    user_id = user.get("id", "")
+    name = user.get("name", "yaar") if user else "yaar"
+    fitness_goal = user.get("fitness_goal", "")
+    today = _todays_tracking_row(db, user_id)
+
+    if today and today.get("workout_done"):
+        context = f"Already worked out today ({today.get('workout_name', '')}) — celebrate it, don't ask again."
+    else:
+        context = "No workout logged yet today. Nudge them gently, don't guilt-trip."
+
+    response = client.messages.create(
+        model=MODEL,
+        max_tokens=110,
+        system=f"You are KYROO, {name}'s AI best friend. Evening WhatsApp check-in about movement/fitness. Gen Z Hinglish, warm, a little teasing if they skipped, never harsh. Max 3 lines. Goal: {fitness_goal}. {context}. 1 emoji max. No em dashes. No motivation quotes.",
+        messages=[{"role": "user", "content": f"Evening fitness check-in for {name}"}]
+    )
+    return response.content[0].text
+
+
+# ─── NIGHT NUDGE (day wrap) ───────────────────────────────────────────────────
+
+def generate_night_nudge(user: dict) -> str:
+    db = get_supabase()
+    user_id = user.get("id", "")
+    name = user.get("name", "yaar") if user else "yaar"
+    today = _todays_tracking_row(db, user_id)
+
+    if today:
+        context = _build_tracking_summary([today])
+    else:
+        context = "No tracking data logged today, that's fine, just wrap the day warmly."
+
+    response = client.messages.create(
+        model=MODEL,
+        max_tokens=130,
+        system=f"You are KYROO, {name}'s AI best friend. Late-night WhatsApp day wrap. Gen Z Hinglish, warm, reflective, not corporate. Max 4 short bubbles (separate with \\n\\n). Today's data: {context}. End with one small, specific thing to focus on tomorrow, not generic advice. No em dashes. No motivation quotes.",
+        messages=[{"role": "user", "content": f"Night wrap for {name}"}]
+    )
+    return response.content[0].text
+
+
 # ─── WEEKLY REPORT ───────────────────────────────────────────────────────────
 
 def generate_weekly_report(user_id: str) -> str:
