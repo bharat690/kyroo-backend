@@ -434,6 +434,72 @@ def build_semantic_context(memory_service: MemoryService, user_id: str, message:
 
 # ─── SYSTEM PROMPT ───────────────────────────────────────────────────────────
 
+def _build_extended_profile_block(user: dict) -> str:
+    """Formats the onboarding fields beyond the core profile line (injuries,
+    preferred workouts, sleep quality/issues, stress triggers, income range,
+    eating habits, dietary restrictions, job type) into a short reference
+    block, skipping anything the user left blank."""
+    if not user:
+        return ""
+
+    def _list(field: str) -> str:
+        vals = user.get(field) or []
+        return ", ".join(v for v in vals if v)
+
+    lines = []
+
+    injuries = user.get("injuries", "")
+    workouts = _list("fitness_workouts")
+    if injuries or workouts:
+        parts = []
+        if workouts:
+            parts.append(f"prefers {workouts}")
+        if injuries:
+            parts.append(f"injuries/limitations: {injuries}")
+        lines.append("Fitness notes: " + "; ".join(parts))
+
+    sleep_quality = user.get("sleep_quality", "")
+    sleep_issues = _list("sleep_issues")
+    if sleep_quality or sleep_issues:
+        parts = []
+        if sleep_quality:
+            parts.append(sleep_quality.lower())
+        if sleep_issues:
+            parts.append(f"issues: {sleep_issues}")
+        lines.append("Sleep notes: " + "; ".join(parts))
+
+    stress_triggers = _list("stress_triggers")
+    if stress_triggers:
+        lines.append(f"Stress triggers: {stress_triggers}")
+
+    income_range = user.get("income_range", "")
+    if income_range:
+        lines.append(f"Income range: {income_range}")
+
+    eat_habits = _list("eat_habits")
+    diet_restrictions = user.get("diet_restrictions", "")
+    if eat_habits or diet_restrictions:
+        parts = []
+        if eat_habits:
+            parts.append(eat_habits)
+        if diet_restrictions:
+            parts.append(f"restrictions: {diet_restrictions}")
+        lines.append("Eating habits: " + "; ".join(parts))
+
+    job_type = user.get("job_type", "")
+    if job_type:
+        lines.append(f"Work/study: {job_type}")
+
+    if not lines:
+        return ""
+
+    return (
+        "EXTENDED PROFILE FROM ONBOARDING (reference naturally when it actually "
+        "fits the conversation, never info-dump or list these back verbatim):\n"
+        + "\n".join(f"- {l}" for l in lines)
+    )
+
+
 def build_system_prompt(
     user: dict,
     module: str,
@@ -456,6 +522,7 @@ def build_system_prompt(
     energy_peak = user.get("energy_peak", "")
     language = user.get("language", "Hinglish")
     nudge_time = user.get("nudge_time", "7 AM")
+    extended_profile_block = _build_extended_profile_block(user)
 
     first_contact_block = ""
     if is_first_contact:
@@ -556,6 +623,8 @@ Fitness goal: {fitness_goal} | Level: {fitness_level} | Diet: {diet_type}
 Sleep: {sleep_hours}hrs | Stress: {stress_level}/10 | Energy peak: {energy_peak}
 Money habit: {money_habit}
 Language: {language} | Nudge time: {nudge_time}
+
+{extended_profile_block}
 
 {memory_context}
 
