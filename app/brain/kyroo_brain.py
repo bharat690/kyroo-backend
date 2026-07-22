@@ -7,7 +7,9 @@ from app.core.config import settings
 from app.database.supabase_client import get_supabase
 from app.services.memory_service import MemoryService
 from app.brain.slang import lookup_slang
-from app.brain.response_validator import validate_response, MAX_EMOJIS_PER_BUBBLE
+from app.brain.response_validator import (
+    validate_response, clean_streamed_bubble, MAX_EMOJIS_PER_BUBBLE, MAX_STREAMED_BUBBLES,
+)
 
 client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
 MODEL = "claude-haiku-4-5"
@@ -265,6 +267,26 @@ def detect_emotion(message: str) -> str:
     if any(k in msg for k in ["bore", "kuch nahi", "bas aise", "aise hi", "procrastinat", "vibe check"]):
         return "neutral_check"
     return "neutral"
+
+
+CASUAL_MODEL_MAX_CHARS = 80
+
+
+def _choose_model(emotion: str, message: str, is_first_contact: bool) -> str:
+    """Routes genuinely low-stakes, casual exchanges to the faster Haiku
+    model and keeps everything else — anything with detected emotional
+    weight, longer/more substantial messages, and a user's very first
+    message — on Sonnet. Conservative on purpose: the EMOTIONAL
+    INTELLIGENCE section of the persona explicitly says nuance matters most
+    exactly when emotion isn't neutral, so that's exactly when this doesn't
+    downgrade the model."""
+    if is_first_contact:
+        return MODEL_SMART
+    if emotion not in ("neutral", "neutral_check"):
+        return MODEL_SMART
+    if len(message.strip()) > CASUAL_MODEL_MAX_CHARS:
+        return MODEL_SMART
+    return MODEL
 
 
 # ─── CRISIS DETECTOR ─────────────────────────────────────────────────────────
@@ -927,34 +949,84 @@ def _build_cached_system(system_static: str, system_dynamic: str) -> list[dict]:
     ]
 
 
-def _run_with_tools(system_static: str, system_dynamic: str, user_content) -> str:
+def _run_with_tools(
+    system_static: str,
+    system_dynamic: str,
+    user_content,
+    model: str = MODEL_SMART,
+    max_emojis: int = MAX_EMOJIS_PER_BUBBLE,
+    on_bubble=None,
+) -> list[str]:
+    """Streams the reply and, if on_bubble is given, calls it as soon as
+    each \\n\\n-delimited chunk is ready (cleaned the same way
+    validate_response() would, just one bubble at a time) instead of
+    sending nothing until the entire reply has finished generating. Once
+    MAX_STREAMED_BUBBLES bubbles are sent, the stream is closed early
+    rather than generating (and paying for) content that would just be
+    discarded anyway. Returns the list of bubbles produced."""
     system = _build_cached_system(system_static, system_dynamic)
     messages = [{"role": "user", "content": user_content}]
+    seen_question_mark = False
+    sent_bubbles: list[str] = []
+
+    def _emit(buffered: str) -> bool:
+        """Cleans and emits one bubble; returns True once the bubble cap is hit."""
+        nonlocal seen_question_mark
+        bubble, seen_question_mark = clean_streamed_bubble(buffered, seen_question_mark, max_emojis)
+        if bubble:
+            sent_bubbles.append(bubble)
+            if on_bubble:
+                on_bubble(bubble)
+        return len(sent_bubbles) >= MAX_STREAMED_BUBBLES
 
     for _ in range(MAX_TOOL_ITERATIONS):
-        response = client.messages.create(
-            model=MODEL_SMART,
+        buffer = ""
+        hit_cap = False
+
+        with client.messages.stream(
+            model=model,
             max_tokens=1200,
             system=system,
             messages=messages,
-            tools=BRAIN_TOOLS
-        )
+            tools=BRAIN_TOOLS,
+        ) as stream:
+            for text in stream.text_stream:
+                buffer += text
+                while "\n\n" in buffer:
+                    chunk, buffer = buffer.split("\n\n", 1)
+                    if _emit(chunk):
+                        hit_cap = True
+                        break
+                if hit_cap:
+                    break
 
-        if response.stop_reason != "tool_use":
-            return " ".join(b.text.strip() for b in response.content if b.type == "text")
+            if hit_cap:
+                # returning here, still inside the `with`, lets the context
+                # manager's own __exit__ release the connection — avoids
+                # double-closing it by also calling stream.close() ourselves
+                return sent_bubbles
+
+            if buffer.strip():
+                if _emit(buffer):
+                    return sent_bubbles
+
+            final_message = stream.get_final_message()
+
+        if final_message.stop_reason != "tool_use":
+            return sent_bubbles
 
         client_tool_calls = [
-            b for b in response.content
+            b for b in final_message.content
             if b.type == "tool_use" and b.name == "lookup_slang"
         ]
 
         if not client_tool_calls:
             # only server tools (web_search) were used; Anthropic already
             # resolved those inline, so this shouldn't normally happen, but
-            # guard against an unresolved loop by returning whatever text exists.
-            return " ".join(b.text.strip() for b in response.content if b.type == "text")
+            # guard against an unresolved loop by returning whatever we have.
+            return sent_bubbles
 
-        messages.append({"role": "assistant", "content": response.content})
+        messages.append({"role": "assistant", "content": final_message.content})
 
         tool_results = []
         for call in client_tool_calls:
@@ -966,15 +1038,19 @@ def _run_with_tools(system_static: str, system_dynamic: str, user_content) -> st
             })
         messages.append({"role": "user", "content": tool_results})
 
-    # ran out of iterations; make one final call without tools to force a plain reply
+    # ran out of iterations; make one final non-streaming call to force a plain reply
     messages.append({"role": "user", "content": "(please just reply now, no more tool calls)"})
     response = client.messages.create(
-        model=MODEL_SMART,
+        model=model,
         max_tokens=1200,
         system=system,
         messages=messages
     )
-    return " ".join(b.text.strip() for b in response.content if b.type == "text")
+    text = " ".join(b.text.strip() for b in response.content if b.type == "text")
+    for chunk in text.split("\n\n"):
+        if _emit(chunk):
+            break
+    return sent_bubbles
 
 
 # ─── MAIN KYROO BRAIN ─────────────────────────────────────────────────────────
@@ -985,8 +1061,15 @@ def kyroo_brain(
     history: list[dict] | None = None,
     image_base64: str | None = None,
     image_media_type: str | None = None,
+    on_bubble=None,
 ) -> dict:
-    """Main brain — takes user data, builds the KYROO persona prompt, generates a reply."""
+    """Main brain — takes user data, builds the KYROO persona prompt, generates a reply.
+
+    If on_bubble is given, bubbles from the main LLM path are sent to it as
+    soon as they're ready (streamed), and the caller should NOT re-send
+    result["bubbles"] itself — check result["already_sent"]. The crisis and
+    math paths don't stream, so they always leave already_sent False and
+    still expect the caller to send result["bubbles"] the normal way."""
 
     db = get_supabase()
     memory_service = MemoryService(db)
@@ -1003,6 +1086,7 @@ def kyroo_brain(
     module = detect_module(message)
     emotion = detect_emotion(message)
     lang_style = detect_language_style(message)
+    chosen_model = _choose_model(emotion, message, is_first_contact)
 
     if module == "math" and not image_base64:
         reply = solve_math(user, message)
@@ -1075,8 +1159,13 @@ def kyroo_brain(
             {"type": "text", "text": full_message or "what do you think of this?"},
         ]
 
-    raw_reply = _run_with_tools(system_static, system_dynamic, full_message)
-    bubbles = validate_response(raw_reply, max_emojis=0 if is_first_contact else MAX_EMOJIS_PER_BUBBLE)
+    max_emojis = 0 if is_first_contact else MAX_EMOJIS_PER_BUBBLE
+    bubbles = _run_with_tools(
+        system_static, system_dynamic, full_message,
+        model=chosen_model, max_emojis=max_emojis, on_bubble=on_bubble,
+    )
+    if not bubbles:
+        bubbles = ["hmm one sec, my brain glitched, say that again?"]
     reply = "\n\n".join(bubbles)
 
     # style persistence, emotional-memory extraction, and the semantic memory
@@ -1085,7 +1174,7 @@ def kyroo_brain(
     # WhatsApp message is already on its way, instead of blocking it here.
     return {
         "response": reply, "bubbles": bubbles, "module": module, "emotion": emotion,
-        "new_style": new_style,
+        "new_style": new_style, "already_sent": on_bubble is not None,
     }
 
 

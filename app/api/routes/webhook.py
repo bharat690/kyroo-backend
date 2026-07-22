@@ -36,6 +36,16 @@ def _save_image_exchange(conversation_service, user, caption, result):
     finalize_chat_turn(user, caption, result, conversation_service.db)
 
 
+def _send_remaining_if_needed(phone: str, result: dict):
+    """Bubbles from the main LLM path are already sent as they streamed in
+    (result["already_sent"] is True); the crisis/math paths don't stream,
+    so their bubbles still need sending here the normal way."""
+    if result.get("already_sent"):
+        return
+    bubbles = result.get("bubbles") or validate_response(result["response"])
+    WhatsAppClient().send(phone, bubbles)
+
+
 @router.get("/webhook")
 async def verify(request: Request):
     mode = request.query_params.get("hub.mode")
@@ -63,6 +73,7 @@ async def webhook(request: Request, db=Depends(get_db)):
 
     message = value["messages"][0]
     phone = message["from"]
+    message_id = message.get("id", "")
     msg_type = message.get("type")
 
     if msg_type == "image":
@@ -73,13 +84,16 @@ async def webhook(request: Request, db=Depends(get_db)):
         image_base64, image_media_type = downloaded if downloaded else (None, None)
 
         try:
+            wa = WhatsAppClient()
+            if message_id:
+                wa.send_typing_indicator(message_id)
+
             user = UserService(db).get_or_create_user(phone)
             conversation_service = ConversationService(db)
 
-            result = kyroo_brain(user, caption, [], image_base64, image_media_type)
-
-            bubbles = result.get("bubbles") or validate_response(result["response"])
-            WhatsAppClient().send(phone, bubbles)
+            on_bubble = lambda b: wa.send_one(phone, b)
+            result = kyroo_brain(user, caption, [], image_base64, image_media_type, on_bubble=on_bubble)
+            _send_remaining_if_needed(phone, result)
 
             # history/memory writes happen after the reply is already sent
             _background_save(
@@ -95,12 +109,19 @@ async def webhook(request: Request, db=Depends(get_db)):
 
     text = message["text"]["body"].strip()
 
-    async def _reply_to_batch(combined_text: str):
+    async def _reply_to_batch(combined_text: str, latest_message_id: str):
         try:
+            wa = WhatsAppClient()
+            if latest_message_id:
+                # marks the message read + shows "typing..." while the LLM
+                # is actually generating, instead of the user seeing nothing
+                # happen for the next several seconds
+                wa.send_typing_indicator(latest_message_id)
+
             orchestrator = Orchestrator(db)
-            user, result = orchestrator.process(phone, combined_text)
-            bubbles = result.get("bubbles") or validate_response(result["response"])
-            WhatsAppClient().send(phone, bubbles)
+            on_bubble = lambda b: wa.send_one(phone, b)
+            user, result = orchestrator.process(phone, combined_text, on_bubble=on_bubble)
+            _send_remaining_if_needed(phone, result)
 
             # chat history + style/memory writes happen after the reply is
             # already on its way to the user, not before
@@ -111,6 +132,6 @@ async def webhook(request: Request, db=Depends(get_db)):
     # buffers rapid consecutive messages (someone splitting one thought
     # across 2-3 texts) into a single reply instead of responding to each
     # fragment separately
-    await buffer_message(phone, text, _reply_to_batch)
+    await buffer_message(phone, text, message_id, _reply_to_batch)
 
     return {"status": "ok"}
