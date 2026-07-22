@@ -52,7 +52,7 @@ def _cap_emojis(bubble: str, max_emojis: int = MAX_EMOJIS_PER_BUBBLE) -> str:
     return re.sub(r' {2,}', ' ', "".join(chars)).strip()
 
 
-def validate_response(text: str) -> list[str]:
+def validate_response(text: str, max_emojis: int = MAX_EMOJIS_PER_BUBBLE) -> list[str]:
     """Validate and split a raw model reply into WhatsApp-ready bubbles."""
     cleaned = text.strip()
 
@@ -85,7 +85,7 @@ def validate_response(text: str) -> list[str]:
 
     bubbles = [b.strip() for b in cleaned.split("\n\n") if b.strip()]
     bubbles = [b for b in bubbles if not _is_leaked_reasoning(b)]
-    bubbles = [_cap_emojis(b) for b in bubbles]
+    bubbles = [_cap_emojis(b, max_emojis) for b in bubbles]
     if not bubbles:
         bubbles = ["hmm one sec, my brain glitched, say that again?"]
     return bubbles[:4]
