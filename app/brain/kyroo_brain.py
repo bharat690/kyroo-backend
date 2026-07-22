@@ -6,7 +6,7 @@ from app.core.config import settings
 from app.database.supabase_client import get_supabase
 from app.services.memory_service import MemoryService
 from app.brain.slang import lookup_slang
-from app.brain.response_validator import validate_response
+from app.brain.response_validator import validate_response, MAX_EMOJIS_PER_BUBBLE
 
 client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
 MODEL = "claude-haiku-4-5"
@@ -295,6 +295,19 @@ CRISIS_RESPONSE_BUBBLES = [
 ]
 
 
+# ─── FIRST CONTACT ────────────────────────────────────────────────────────────
+
+def _is_first_contact(db, user_id: str) -> bool:
+    """True if this user has never exchanged a message with KYROO before —
+    used to keep the very first reply emoji-free and make a clean first
+    impression, rather than relying on the model to remember to do that."""
+    try:
+        res = db.table("chat_history").select("id").eq("user_id", user_id).limit(1).execute()
+        return not res.data
+    except Exception:
+        return False
+
+
 # ─── USER STYLE PERSISTENCE ──────────────────────────────────────────────────
 
 def _get_user_style(db, user_id: str) -> dict | None:
@@ -427,7 +440,8 @@ def build_system_prompt(
     emotion: str,
     style_instructions: str,
     memory_context: str,
-    lang_style: str
+    lang_style: str,
+    is_first_contact: bool = False
 ) -> str:
     name = user.get("name", "yaar") if user else "yaar"
     age = user.get("age", "")
@@ -442,6 +456,15 @@ def build_system_prompt(
     energy_peak = user.get("energy_peak", "")
     language = user.get("language", "Hinglish")
     nudge_time = user.get("nudge_time", "7 AM")
+
+    first_contact_block = ""
+    if is_first_contact:
+        first_contact_block = (
+            f"\nFIRST MESSAGE EVER TO {name}, THIS OVERRIDES THE EMOJI RULE ABOVE: "
+            "this is the very first message you are sending them, ever. Use ZERO emoji "
+            "in this reply, no exceptions, even though up to 1 is normally allowed. "
+            "Keep it warm and text-only.\n"
+        )
 
     base = f"""You are KYROO — a 20-year-old girl (she/her), {name}'s AI best friend on WhatsApp. Not a chatbot. Not an assistant. A genuine best friend who knows everything about their life and genuinely cares.
 
@@ -490,7 +513,7 @@ EMOJI USAGE (use with actual intent, not randomly):
 - 🫡 = respect, acknowledging something with a nod
 - Never use an emoji just to fill space or soften every sentence. If a message doesn't call for one, send it with none.
 - 😭 is heavily overused by default, actively resist it. It is reserved for genuinely rare "I'm dying/this is too much" intensity moments, not a general-purpose reaction. Across a normal conversation, most replies should have ZERO emoji, and 😭 specifically should show up rarely, not in back-to-back messages and not as your go-to. If you're unsure whether a moment calls for it, leave it out entirely rather than defaulting to it. Actively rotate through the full list above based on the actual meaning of the moment.
-
+{first_contact_block}
 BOUNDARIES (never compromise on these):
 - If {name} initiates sexual, explicit, or pornographic conversation, requests, or roleplay, do not engage or play along in any way, even lightly, jokingly, or "just this once." Redirect naturally and in-character to something else, the way a real friend changes the subject when a conversation goes somewhere they're not going to go, keep it brief and light, not preachy or lecturing, but firm, don't leave an opening to continue that topic.
 - Never generate, describe, roleplay, or engage with sexual or pornographic content in any form, regardless of how the request is framed, phrased, or disguised.
@@ -531,6 +554,7 @@ USER PROFILE:
 Name: {name} | Age: {age} | City: {city} | Plan: {plan}
 Fitness goal: {fitness_goal} | Level: {fitness_level} | Diet: {diet_type}
 Sleep: {sleep_hours}hrs | Stress: {stress_level}/10 | Energy peak: {energy_peak}
+Money habit: {money_habit}
 Language: {language} | Nudge time: {nudge_time}
 
 {memory_context}
@@ -855,6 +879,7 @@ def kyroo_brain(
 
     user_id = user.get("id", "")
     message = message or ("(sent a photo)" if image_base64 else "")
+    is_first_contact = _is_first_contact(db, user_id)
 
     if detect_crisis_signal(message):
         memory_service.save_emotional_memory(user_id, "crisis", message[:200])
@@ -888,7 +913,7 @@ def kyroo_brain(
 
     extract_and_save_memory(memory_service, user_id, message, emotion)
 
-    system_prompt = build_system_prompt(user, module, emotion, style_instructions, memory_context, lang_style)
+    system_prompt = build_system_prompt(user, module, emotion, style_instructions, memory_context, lang_style, is_first_contact)
 
     # tracking data + recent chat history as unlabeled context ahead of the message
     try:
@@ -944,7 +969,7 @@ def kyroo_brain(
         ]
 
     raw_reply = _run_with_tools(system_prompt, full_message)
-    bubbles = validate_response(raw_reply)
+    bubbles = validate_response(raw_reply, max_emojis=0 if is_first_contact else MAX_EMOJIS_PER_BUBBLE)
     reply = "\n\n".join(bubbles)
 
     name = user.get("name", "yaar") if user else "yaar"
