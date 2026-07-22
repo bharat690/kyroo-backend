@@ -52,6 +52,51 @@ def _cap_emojis(bubble: str, max_emojis: int = MAX_EMOJIS_PER_BUBBLE) -> str:
     return re.sub(r' {2,}', ' ', "".join(chars)).strip()
 
 
+STREAM_BUBBLE_MAX_WORDS = 50
+MAX_STREAMED_BUBBLES = 4
+
+
+def clean_streamed_bubble(text: str, seen_question_mark: bool, max_emojis: int = MAX_EMOJIS_PER_BUBBLE) -> tuple[str, bool]:
+    """Per-bubble equivalent of validate_response()'s cleanup, for when
+    bubbles are sent progressively as they stream in rather than all at once
+    after the full reply is known. Mirrors the same rules (cliche-phrase
+    stripping, at most one question mark across the whole reply, leaked-
+    reasoning filtering, a length backstop, emoji cap), just applied one
+    bubble at a time — seen_question_mark carries the "have we already used
+    our one question mark in an earlier bubble THIS reply" state across
+    calls. Returns ("", seen_question_mark) for a bubble that should be
+    dropped entirely (e.g. leaked reasoning)."""
+    cleaned = text.strip()
+    if not cleaned:
+        return "", seen_question_mark
+
+    for phrase in CLICHE_PHRASES:
+        cleaned = re.sub(re.escape(phrase), "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r' {2,}', ' ', cleaned).strip()
+    if not cleaned or _is_leaked_reasoning(cleaned):
+        return "", seen_question_mark
+
+    is_list = bool(_LIST_LINE.search(cleaned))
+    if not is_list:
+        chars = list(cleaned)
+        for i, c in enumerate(chars):
+            if c == '?':
+                if seen_question_mark:
+                    chars[i] = '.'
+                else:
+                    seen_question_mark = True
+        cleaned = "".join(chars)
+
+    words = cleaned.split()
+    if len(words) > STREAM_BUBBLE_MAX_WORDS:
+        hard_cut = " ".join(words[:STREAM_BUBBLE_MAX_WORDS])
+        last_sentence_end = max(hard_cut.rfind("."), hard_cut.rfind("!"), hard_cut.rfind("?"))
+        cleaned = hard_cut[:last_sentence_end + 1] if last_sentence_end > len(hard_cut) * 0.4 else hard_cut
+
+    cleaned = _cap_emojis(cleaned, max_emojis)
+    return cleaned, seen_question_mark
+
+
 def validate_response(text: str, max_emojis: int = MAX_EMOJIS_PER_BUBBLE) -> list[str]:
     """Validate and split a raw model reply into WhatsApp-ready bubbles."""
     cleaned = text.strip()

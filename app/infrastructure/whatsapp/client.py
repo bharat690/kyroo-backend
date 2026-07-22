@@ -41,20 +41,46 @@ class WhatsAppClient:
             print(f"[whatsapp] media download error: {e}")
             return None
 
+    def send_typing_indicator(self, message_id: str):
+        """Marks the incoming message as read and shows a native "typing..."
+        indicator in the user's chat, which Meta keeps showing for up to 25s
+        or until we actually send a reply, whichever is first. Call this as
+        soon as we start working on a reply (before the LLM call), so the
+        user sees something happening during generation instead of silence."""
+        try:
+            response = requests.post(
+                f"{self.BASE_URL}/{settings.phone_number_id}/messages",
+                headers={
+                    "Authorization": f"Bearer {settings.whatsapp_token}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "messaging_product": "whatsapp",
+                    "status": "read",
+                    "message_id": message_id,
+                    "typing_indicator": {"type": "text"},
+                },
+                timeout=10,
+            )
+            response.raise_for_status()
+        except Exception as e:
+            # never let a typing-indicator failure block the actual reply
+            print(f"[whatsapp] typing indicator error: {e}")
+
+    def send_one(self, phone: str, message: str, delay: float | None = None):
+        time.sleep(delay if delay is not None else random.uniform(*self.DEFAULT_DELAY_RANGE))
+        self._send_single_message(phone, message)
+
     def send(self, phone: str, messages: list[str]):
         for message in messages:
-            time.sleep(random.uniform(*self.DEFAULT_DELAY_RANGE))
-            self._send_single_message(phone, message)
+            self.send_one(phone, message)
 
     def send_bubbles(self, phone: str, bubbles: list[str], bubble_plan=None):
         for i, bubble in enumerate(bubbles):
+            delay = None
             if bubble_plan and i < len(bubble_plan.bubbles):
                 delay = bubble_plan.bubbles[i].delay
-            else:
-                delay = random.uniform(*self.DEFAULT_DELAY_RANGE)
-
-            time.sleep(delay)
-            self._send_single_message(phone, bubble)
+            self.send_one(phone, bubble, delay)
 
     def _send_single_message(self, phone: str, message: str):
         response = requests.post(

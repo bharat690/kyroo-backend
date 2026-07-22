@@ -14,12 +14,16 @@ class Orchestrator:
         self,
         phone_number: str,
         message: str,
+        on_bubble=None,
     ) -> tuple[dict, dict]:
         """Process a user message through the full brain pipeline. Returns
-        (user, result) — the reply text/bubbles are ready to send immediately
-        in result. Saving the exchange is deliberately NOT done here; call
-        save_exchange() after the reply has actually been sent, so the user
-        isn't waiting on writes their reply doesn't depend on."""
+        (user, result). If on_bubble is given, bubbles from the main LLM
+        path are streamed to it as they're ready and result["already_sent"]
+        will be True — otherwise (or for the crisis/math paths) the caller
+        still needs to send result["bubbles"] itself. Saving the exchange is
+        deliberately NOT done here; call save_exchange() after the reply has
+        actually been sent, so the user isn't waiting on writes their reply
+        doesn't depend on."""
 
         # 1. Get or create user
         user = self.user_service.get_or_create_user(phone_number)
@@ -34,6 +38,7 @@ class Orchestrator:
             user=user,
             message=message,
             history=history,
+            on_bubble=on_bubble,
         )
 
         return user, result
