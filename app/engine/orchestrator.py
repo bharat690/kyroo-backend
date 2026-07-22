@@ -1,6 +1,6 @@
 from app.services.user_service import UserService
 from app.services.conversation_service import ConversationService
-from app.brain.kyroo_brain import kyroo_brain, validate_response
+from app.brain.kyroo_brain import kyroo_brain, finalize_chat_turn
 
 
 class Orchestrator:
@@ -8,13 +8,18 @@ class Orchestrator:
     def __init__(self, db=None):
         self.user_service = UserService(db)
         self.conversation_service = ConversationService(db)
+        self.db = self.conversation_service.db
 
     def process(
         self,
         phone_number: str,
         message: str,
-    ) -> str:
-        """Process a user message through the full brain pipeline."""
+    ) -> tuple[dict, dict]:
+        """Process a user message through the full brain pipeline. Returns
+        (user, result) — the reply text/bubbles are ready to send immediately
+        in result. Saving the exchange is deliberately NOT done here; call
+        save_exchange() after the reply has actually been sent, so the user
+        isn't waiting on writes their reply doesn't depend on."""
 
         # 1. Get or create user
         user = self.user_service.get_or_create_user(phone_number)
@@ -31,20 +36,11 @@ class Orchestrator:
             history=history,
         )
 
-        # 4. Save user message
-        self.conversation_service.add_message(
-            user=user,
-            role="user",
-            content=message,
-            module=result.get("module", "general"),
-        )
+        return user, result
 
-        # 5. Save KIRO response
-        self.conversation_service.add_message(
-            user=user,
-            role="assistant",
-            content=result["response"],
-            module=result.get("module", "general"),
-        )
-
-        return result["response"]
+    def save_exchange(self, user: dict, message: str, result: dict) -> None:
+        """Persists the exchange (chat history + style/memory) — call this
+        after the reply has already been sent to the user."""
+        module = result.get("module", "general")
+        self.conversation_service.add_exchange(user, message, result["response"], module)
+        finalize_chat_turn(user, message, result, self.db)

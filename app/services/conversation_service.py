@@ -31,6 +31,21 @@ class ConversationService:
 
         return {"conversation_id": user["id"]}
 
+    def add_exchange(
+        self,
+        user: dict,
+        user_message: str,
+        kiro_response: str,
+        module: str = "general",
+    ) -> None:
+        """Saves the user message + KYROO's reply as a single batched insert
+        (2 rows, 1 network round trip) instead of two separate add_message()
+        calls."""
+        self.db.table("chat_history").insert([
+            {"user_id": user["id"], "user_message": user_message, "kiro_response": "", "module": module},
+            {"user_id": user["id"], "user_message": "", "kiro_response": kiro_response, "module": module},
+        ]).execute()
+
     def history(
         self,
         conversation_id: str,

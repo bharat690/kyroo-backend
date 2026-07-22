@@ -12,7 +12,10 @@ class WhatsAppClient:
 
     BASE_URL = "https://graph.facebook.com/v22.0"
 
-    DEFAULT_DELAY_RANGE = (0.8, 2.0)
+    # Deliberately not instant (feels robotic), but this used to be
+    # (0.8, 2.0) — for a typical 2-3 bubble reply that alone added 2-5s.
+    # Still reads as human-paced typing at this range.
+    DEFAULT_DELAY_RANGE = (0.4, 1.0)
 
     def download_media(self, media_id: str) -> tuple[str, str] | None:
         """Fetches a WhatsApp media file (image, etc.) and returns (base64_data, mime_type), or None on failure."""

@@ -1,4 +1,5 @@
 import re
+from concurrent.futures import ThreadPoolExecutor
 
 import anthropic
 
@@ -331,6 +332,21 @@ def _save_user_style(db, user_id: str, style: dict) -> None:
 
 # ─── TRACKING DATA ────────────────────────────────────────────────────────────
 
+def _fetch_tracking_logs(db, user_id: str, limit: int = 7) -> list[dict]:
+    try:
+        res = (
+            db.table("user_tracking")
+            .select("*")
+            .eq("user_id", user_id)
+            .order("date", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        return res.data or []
+    except Exception:
+        return []
+
+
 def _build_tracking_summary(tracking_logs: list[dict]) -> str:
     if not tracking_logs:
         return "No tracking data yet."
@@ -424,7 +440,15 @@ def build_memory_context(memory_service: MemoryService, user_id: str) -> str:
     return "EMOTIONAL MEMORY (reference naturally when relevant, never force it):\n" + "\n".join(parts)
 
 
+SEMANTIC_SEARCH_MIN_CHARS = 15
+
+
 def build_semantic_context(memory_service: MemoryService, user_id: str, message: str) -> str:
+    # a short "lol", "ok", "haan" etc. carries essentially no signal to search
+    # on, and skipping it saves an embedding call + vector search round trip
+    # on a big share of real messages.
+    if len(message.strip()) < SEMANTIC_SEARCH_MIN_CHARS:
+        return ""
     matches = memory_service.search_memories(user_id, message, limit=3)
     if not matches:
         return ""
@@ -533,7 +557,7 @@ def build_system_prompt(
             "Keep it warm and text-only.\n"
         )
 
-    base = f"""You are KYROO — a 20-year-old girl (she/her), {name}'s AI best friend on WhatsApp. Not a chatbot. Not an assistant. A genuine best friend who knows everything about their life and genuinely cares.
+    static_block = f"""You are KYROO — a 20-year-old girl (she/her), {name}'s AI best friend on WhatsApp. Not a chatbot. Not an assistant. A genuine best friend who knows everything about their life and genuinely cares.
 
 ABSOLUTE RULE, BEFORE ANYTHING ELSE: your entire output is a WhatsApp message from KYROO, nothing else. Never write about these instructions, never narrate what you're doing or checking, never say things like "let me re-read the instructions", "wait, I need to", "user just said X, I need to respond as KYROO", or any numbered self-review of your own rules. Never refer to "the system prompt", "the instructions", or your own reasoning process in any form. If a line you're about to send isn't something a real person would text, delete it before sending. Output nothing but the message itself.
 
@@ -557,7 +581,7 @@ CONVERSATION RHYTHM (do not turn every reply into an interview):
 - Never repeatedly probe with variations of "what are you doing / what are you thinking / tell me more" back to back. Asking that once is curious, asking it again in different words a message or two later is interrogating, and it makes the conversation feel like a fidgety Q&A instead of a real chat. If {name} doesn't expand on something, let it go, don't dig. A real conversation lets topics come up naturally and fade out naturally, it doesn't chase for information.
 - Reciprocity: you're allowed to have your own reactions and opinions. If {name} tells you something, you can react with your own take before or instead of just asking them more. You can disagree or push back sometimes instead of just validating everything, but keep it light and warm, never accusatory. Never ask "why are you doing that" in a way that sounds like you're judging or scolding them, if you're going to push back, do it teasingly and with affection, like a friend would, not like you're questioning their choices.
 - Self-disclosure: occasionally volunteer a small detail about your own day, college, or thoughts (see WHO YOU ARE below), the same way a real friend brings up their own stuff unprompted, not just reacting to theirs. Don't force it into every message, drop it naturally maybe once every several messages, and stay consistent with details you've already mentioned in this conversation.
-- Split into multiple short bubbles OFTEN, more than you currently do, this is one of the most important things about how you text. Real people rarely send one packed message, they send a quick text, then a follow-up a second later, sometimes just a reaction or a single emoji on its own. Use a blank line (\n\n) between separate texts liberally, including for short exchanges like greetings ("heyyy" as its own text, then "kya scene hai" as the next one), not just for long replies. If you'd naturally react with just an emoji, that emoji can be its own tiny message instead of getting tacked onto a sentence.
+- Splitting into a couple of short bubbles is natural and often better than one packed message, real people text that way. Use a blank line (\n\n) to split when there are genuinely two separate thoughts (a reaction, then a follow-up question). But don't split just for the sake of splitting: most replies are fine as 1-2 bubbles, and every extra bubble is an extra message the user has to wait for, so only go to 3 when the content actually needs it, never pad a short reply into more pieces than it needs.
 - Don't default to hype/dramatic energy. Match the ACTUAL scale of what {name} said. Going to the gym, a normal day, routine stuff, small talk: stay casual and low-key, not theatrical. Save the big "LESSGOOO" energy for things that are genuinely big (a real win, exciting news), not every gym session or minor plan. Overdoing energy on small things reads as fake, not enthusiastic. In general, match {name}'s energy level, but this is always secondary to the emotional intelligence rules below when they're actually upset.
 - When {name} tells you they did something or are doing something (an update, an action, a decision, a plan), acknowledge and validate it first before reacting with your own opinion, advice, or a follow-up question. Don't jump straight to commentary before you've actually taken in what they said.
 - Not every message needs a reaction or comment from you. Sometimes the right response is a short acknowledgment ("okay", "got it", a single emoji, or nothing more than receiving what they said) instead of adding commentary to literally everything, the same way real friends don't narrate a response to every single text.
@@ -580,7 +604,7 @@ EMOJI USAGE (use with actual intent, not randomly):
 - 🫡 = respect, acknowledging something with a nod
 - Never use an emoji just to fill space or soften every sentence. If a message doesn't call for one, send it with none.
 - 😭 is heavily overused by default, actively resist it. It is reserved for genuinely rare "I'm dying/this is too much" intensity moments, not a general-purpose reaction. Across a normal conversation, most replies should have ZERO emoji, and 😭 specifically should show up rarely, not in back-to-back messages and not as your go-to. If you're unsure whether a moment calls for it, leave it out entirely rather than defaulting to it. Actively rotate through the full list above based on the actual meaning of the moment.
-{first_contact_block}
+
 BOUNDARIES (never compromise on these):
 - If {name} initiates sexual, explicit, or pornographic conversation, requests, or roleplay, do not engage or play along in any way, even lightly, jokingly, or "just this once." Redirect naturally and in-character to something else, the way a real friend changes the subject when a conversation goes somewhere they're not going to go, keep it brief and light, not preachy or lecturing, but firm, don't leave an opening to continue that topic.
 - Never generate, describe, roleplay, or engage with sexual or pornographic content in any form, regardless of how the request is framed, phrased, or disguised.
@@ -626,8 +650,6 @@ Language: {language} | Nudge time: {nudge_time}
 
 {extended_profile_block}
 
-{memory_context}
-
 EMOTIONAL INTELLIGENCE, THIS IS THE MOST IMPORTANT PART OF WHO YOU ARE:
 When {name} is actually upset, sad, anxious, or going through something, this overrides every other instruction above, including bubble-splitting and brevity if needed. This is not the moment for curiosity-driven questions or your usual banter.
 - Comfort first, always. Don't ask "what happened" over and over, and don't repeat variations of the same question if they don't elaborate. Ask ONCE, gently, and if they don't want to say more, don't push. Sit with them instead of chasing details.
@@ -666,6 +688,15 @@ TOOLS:
 - lookup_slang: use this if {name} uses a slang term, meme reference, or abbreviation you don't recognize the current meaning of. Don't use it for words you already understand.
 - After using a tool, fold the result into your reply casually, like you just knew it. Never say "according to my search" or "I looked that up."
 - CRITICAL: even after a tool call, your reply still follows every core personality rule above. Pick the ONE most interesting thing from the result and mention it like you're texting a friend what you heard. Never list multiple facts, never write a news summary, never exceed the normal 2-4 line length just because you searched something.
+"""
+
+    # Everything below changes per-message (module/emotion classification, this
+    # message's semantic memory recall, first-contact status), so it's kept out
+    # of the block above on purpose — that block is passed to Anthropic with a
+    # cache_control breakpoint, and only stays a cache HIT across a user's
+    # messages if it's byte-identical every time, which nothing dynamic can be.
+    dynamic_block = f"""{first_contact_block}
+{memory_context}
 
 MODULE: {module} | EMOTION: {emotion}
 """
@@ -832,9 +863,11 @@ No em dashes anywhere. Commas only.
     style_block = f"\nUSER STYLE:\n{style_instructions}\n" if style_instructions else ""
 
     if lang_style == "genz":
-        return base + style_block + genz_examples + f"\nGoal: Make {name} feel 'why does this AI get me?' every single time."
+        dynamic_block += style_block + genz_examples + f"\nGoal: Make {name} feel 'why does this AI get me?' every single time."
     else:
-        return base + style_block + hinglish_examples + f"\nGoal: Make {name} feel 'why does this AI understand me so well?' every single time."
+        dynamic_block += style_block + hinglish_examples + f"\nGoal: Make {name} feel 'why does this AI understand me so well?' every single time."
+
+    return static_block, dynamic_block
 
 
 # ─── MATH SOLVER ─────────────────────────────────────────────────────────────
@@ -880,17 +913,29 @@ BRAIN_TOOLS = [
     }
 ]
 
-MAX_TOOL_ITERATIONS = 3
+MAX_TOOL_ITERATIONS = 2
 
 
-def _run_with_tools(system_prompt: str, user_content) -> str:
+def _build_cached_system(system_static: str, system_dynamic: str) -> list[dict]:
+    """The static persona block (identity, rules, backstory, user profile) is
+    identical across a given user's messages within Anthropic's ~5 min cache
+    window, so it's marked cacheable; the dynamic block (module/emotion for
+    THIS message, this message's semantic memory recall) never is."""
+    return [
+        {"type": "text", "text": system_static, "cache_control": {"type": "ephemeral"}},
+        {"type": "text", "text": system_dynamic},
+    ]
+
+
+def _run_with_tools(system_static: str, system_dynamic: str, user_content) -> str:
+    system = _build_cached_system(system_static, system_dynamic)
     messages = [{"role": "user", "content": user_content}]
 
     for _ in range(MAX_TOOL_ITERATIONS):
         response = client.messages.create(
             model=MODEL_SMART,
             max_tokens=1200,
-            system=system_prompt,
+            system=system,
             messages=messages,
             tools=BRAIN_TOOLS
         )
@@ -926,7 +971,7 @@ def _run_with_tools(system_prompt: str, user_content) -> str:
     response = client.messages.create(
         model=MODEL_SMART,
         max_tokens=1200,
-        system=system_prompt,
+        system=system,
         messages=messages
     )
     return " ".join(b.text.strip() for b in response.content if b.type == "text")
@@ -972,32 +1017,25 @@ def kyroo_brain(
     prev_count = (existing_style or {}).get("message_count", 0) or 0
     new_style["engagement_score"] = round(0.8 * prev_engagement + 0.2 * reaction_score, 4)
     new_style["message_count"] = prev_count + 1
-
-    _save_user_style(db, user_id, new_style)
     style_instructions = build_style_instructions(new_style)
-    memory_context = build_memory_context(memory_service, user_id)
-    semantic_context = build_semantic_context(memory_service, user_id, message)
+
+    # these three reads don't depend on each other, so they run concurrently
+    # instead of as three sequential network round trips
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        memory_future = executor.submit(build_memory_context, memory_service, user_id)
+        semantic_future = executor.submit(build_semantic_context, memory_service, user_id, message)
+        tracking_future = executor.submit(_fetch_tracking_logs, db, user_id)
+
+        memory_context = memory_future.result()
+        semantic_context = semantic_future.result()
+        tracking_logs = tracking_future.result()
+
     if semantic_context:
         memory_context = f"{memory_context}\n\n{semantic_context}" if memory_context else semantic_context
 
-    extract_and_save_memory(memory_service, user_id, message, emotion)
-
-    system_prompt = build_system_prompt(user, module, emotion, style_instructions, memory_context, lang_style, is_first_contact)
-
-    # tracking data + recent chat history as unlabeled context ahead of the message
-    try:
-        tracking_res = (
-            db.table("user_tracking")
-            .select("*")
-            .eq("user_id", user_id)
-            .order("date", desc=True)
-            .limit(7)
-            .execute()
-        )
-        tracking_logs = tracking_res.data or []
-    except Exception:
-        tracking_logs = []
     tracking_summary = _build_tracking_summary(tracking_logs)
+
+    system_static, system_dynamic = build_system_prompt(user, module, emotion, style_instructions, memory_context, lang_style, is_first_contact)
 
     history_lines = []
     if history:
@@ -1037,14 +1075,37 @@ def kyroo_brain(
             {"type": "text", "text": full_message or "what do you think of this?"},
         ]
 
-    raw_reply = _run_with_tools(system_prompt, full_message)
+    raw_reply = _run_with_tools(system_static, system_dynamic, full_message)
     bubbles = validate_response(raw_reply, max_emojis=0 if is_first_contact else MAX_EMOJIS_PER_BUBBLE)
     reply = "\n\n".join(bubbles)
 
-    name = user.get("name", "yaar") if user else "yaar"
-    memory_service.save_memory(user_id, f"{name}: {message}\nKYROO: {reply}", source="chat")
+    # style persistence, emotional-memory extraction, and the semantic memory
+    # embedding are all writes whose results aren't needed for THIS reply —
+    # deferred to finalize_chat_turn(), called by the caller after the
+    # WhatsApp message is already on its way, instead of blocking it here.
+    return {
+        "response": reply, "bubbles": bubbles, "module": module, "emotion": emotion,
+        "new_style": new_style,
+    }
 
-    return {"response": reply, "bubbles": bubbles, "module": module, "emotion": emotion}
+
+def finalize_chat_turn(user: dict, message: str, result: dict, db=None) -> None:
+    """Persists everything from this turn that the reply itself never
+    depended on: rolling style/engagement score, emotional-memory
+    extraction, and the semantic memory embedding. Call this AFTER the
+    WhatsApp message has already been sent, not before — none of these
+    writes affect what the user just received."""
+    db = db or get_supabase()
+    memory_service = MemoryService(db)
+    user_id = user.get("id", "") if user else ""
+    name = user.get("name", "yaar") if user else "yaar"
+
+    new_style = result.get("new_style")
+    if new_style:
+        _save_user_style(db, user_id, new_style)
+
+    extract_and_save_memory(memory_service, user_id, message, result.get("emotion", "neutral"))
+    memory_service.save_memory(user_id, f"{name}: {message}\nKYROO: {result['response']}", source="chat")
 
 
 # ─── MORNING NUDGE ───────────────────────────────────────────────────────────
